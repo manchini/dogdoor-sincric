@@ -1,5 +1,0 @@
-#define WIFI_SSID         "SSID"
-#define WIFI_PASS         "PASS"
-#define APP_KEY           "KEY"
-#define APP_SECRET        "SECRET"
-#define SWITCH_ID         "ID"
