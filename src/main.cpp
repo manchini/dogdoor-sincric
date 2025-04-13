@@ -7,18 +7,36 @@
 
 #define BAUD_RATE         115200             
 #define BUTTON_PIN        34
-#define RELAY_PIN         13
-#define LIGHT_OPEN_PIN         12
-#define ALWAYS_ON_PIN         14
+#define SERVO_PIN         12
+#define LIGHT_OPEN_PIN         14
+#define ALWAYS_ON_PIN         26
+
+#define BUTTON_PRESS_MIN_DURATION 200  // tempo mínimo em ms para considerar botão pressionado
   
 bool myPowerState = false;
 unsigned long lastBtnPress = 0;
 Servo servo1;
 
+unsigned long buttonPressedSince = 0;
+bool buttonPreviouslyPressed = false;
+
 void action(){
-  //digitalWrite(RELAY_PIN, myPowerState?LOW:HIGH); // if myPowerState indicates device turned on: turn on led (builtin led uses inverted logic: LOW = LED ON / HIGH = LED OFF)
-  servo1.write(myPowerState?0:160);    
   digitalWrite(LIGHT_OPEN_PIN, myPowerState?HIGH:LOW);
+
+  int startAngle = myPowerState ? 120 : 0;
+  int endAngle = myPowerState ? 0 : 120;
+
+  int step = (startAngle < endAngle) ? 1 : -1;
+  int totalSteps = abs(endAngle - startAngle);
+  int delayPerStep = 2000 / totalSteps; 
+
+  for (int angle = startAngle; angle != endAngle; angle += step) {
+    servo1.write(angle);
+    delay(delayPerStep);
+  }
+
+  servo1.write(endAngle); // Garante o ângulo final exato
+  
 }
 
 /* bool onPowerState(String deviceId, bool &state) 
@@ -45,31 +63,43 @@ bool onPowerState(const String &deviceId, bool &state) {
 }
 
 void handleButtonPress() {
-  unsigned long actualMillis = millis(); 
-  int val = analogRead(BUTTON_PIN);  
-  if (val == 4095  && actualMillis - lastBtnPress > 1000)  {   
-    if (myPowerState) {     // flip myPowerState: if it was true, set it to false, vice versa
-      myPowerState = false;
-    } else {
-      myPowerState = true;
-    }
-   
-    action();
-    if (SinricPro.isConnected() == false) {
-      Serial.printf("Not connected to Sinric Pro...!\r\n");
-      return; 
+  unsigned long actualMillis = millis();
+  int val = analogRead(BUTTON_PIN); 
+
+  bool buttonPressed = (val == 4095); 
+  if (buttonPressed) {
+    if (!buttonPreviouslyPressed) {
+      // começou a pressionar agora
+      buttonPressedSince = actualMillis;
+      buttonPreviouslyPressed = true;
     }
 
-    // get Switch device back
-    SinricProSwitch& mySwitch = SinricPro[SWITCH_ID];
-    // send powerstate event
-    mySwitch.sendPowerStateEvent(myPowerState); // send the new powerState to SinricPro server
-    Serial.printf("Device %s turned %s (manually via flashbutton)\r\n", mySwitch.getDeviceId().c_str(), myPowerState?"on":"off");
+    // Se estiver pressionado há tempo suficiente
+    if ((actualMillis - buttonPressedSince >= BUTTON_PRESS_MIN_DURATION) && 
+        (actualMillis - lastBtnPress > 1000)) {
 
-    lastBtnPress = actualMillis;  // update last button press variable
-  } 
+      myPowerState = !myPowerState; // inverte estado
+
+      if (!SinricPro.isConnected()) {
+        Serial.println("Not connected to Sinric Pro...!");
+        return;
+      }
+
+      SinricProSwitch& mySwitch = SinricPro[SWITCH_ID];
+      mySwitch.sendPowerStateEvent(myPowerState);
+      Serial.printf("Device %s turned %s (manually via flashbutton)\r\n",
+                    mySwitch.getDeviceId().c_str(),
+                    myPowerState ? "on" : "off");
+
+      lastBtnPress = actualMillis;
+      action();      
+    }
+
+  } else {
+    // botão solto
+    buttonPreviouslyPressed = false;
+  }
 }
-
 
 // setup function for WiFi connection
 void setupWiFi() {
@@ -111,11 +141,13 @@ void setup() {
 
   digitalWrite(ALWAYS_ON_PIN,HIGH);
   
-  servo1.attach(RELAY_PIN);    
+  servo1.setPeriodHertz(50);
+  servo1.attach(SERVO_PIN);    
 
   Serial.begin(BAUD_RATE); Serial.printf("\r\n\r\n");
   setupWiFi();
   setupSinricPro();
+  action();
 }
 
 void loop() {
